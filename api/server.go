@@ -2,34 +2,32 @@ package api
 
 import (
 	"encoding/json"
+	"go-taskqueue/model"
+	"go-taskqueue/queue"
 	"net/http"
 	"strconv"
-	"go-taskqueue/model"
+	"sync"
 )
 
 
-var tasks = []model.Task{
-	{ID: 1, Status: "pending", Result: 0},
-	{ID: 2, Status: "completed", Result: 42},
-}
+var taskStore = make(map[int]*model.Task)
+var taskIDCounter int
+var taskStoreMu sync.RWMutex
+
 
 func getTask(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
-
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
 		http.Error(w, "Invalid task ID", http.StatusBadRequest)
 		return
 	}
 
-	var task *model.Task
-	for i := range tasks {
-		if tasks[i].ID == id {
-			task = &tasks[i]
-		}
-	}
+	taskStoreMu.RLock()
+	task, ok := taskStore[id]
+	taskStoreMu.RUnlock()
 
-	if task == nil {
+	if !ok {
 		http.Error(w, "task not found", http.StatusNotFound)
 		return
 	}
@@ -46,8 +44,14 @@ func postTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	task.ID = len(tasks) + 1
-	tasks = append(tasks, task)
+	taskStoreMu.Lock()
+	taskIDCounter++
+	task.ID = taskIDCounter
+	task.Status = "queued"
+	taskStore[task.ID] = &task
+	taskStoreMu.Unlock()
+	
+	queue.Tasks <- task
 
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(task)
