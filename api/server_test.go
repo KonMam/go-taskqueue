@@ -3,13 +3,14 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"go-taskqueue/model"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 )
 
 func TestGetTask(t *testing.T) {
-	tasks = []Task{
+	tasks = []model.Task{
 		{ID: 1, Status: "queued", Result: 0},
 	}
 
@@ -25,7 +26,7 @@ func TestGetTask(t *testing.T) {
 			t.Fatalf("expected 200, got %d", resp.StatusCode)
 		}
 
-		var task Task
+		var task model.Task
 		if err := json.NewDecoder(resp.Body).Decode(&task); err != nil {
 			t.Fatalf("failed to decode JSON: %v", err)
 		}
@@ -75,7 +76,7 @@ func TestPostTask(t *testing.T) {
 			t.Fatalf("expected 201, got %d", resp.StatusCode)
 		}
 
-		var task Task
+		var task model.Task
 		json.NewDecoder(resp.Body).Decode(&task)
 		if task.ID != 1 || task.Result != 123 || task.Status != "new" {
 			t.Errorf("unexpected task: %+v", task)

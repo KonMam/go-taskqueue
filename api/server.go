@@ -4,15 +4,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"go-taskqueue/model"
 )
 
-type Task struct {
-	ID     int    `json:"id"`
-	Status string `json:"status"`
-	Result int    `json:"result"`
-}
 
-var tasks = []Task{
+var tasks = []model.Task{
 	{ID: 1, Status: "pending", Result: 0},
 	{ID: 2, Status: "completed", Result: 42},
 }
@@ -26,7 +22,7 @@ func getTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var task *Task
+	var task *model.Task
 	for i := range tasks {
 		if tasks[i].ID == id {
 			task = &tasks[i]
@@ -43,7 +39,7 @@ func getTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func postTask(w http.ResponseWriter, r *http.Request) {
-	var task Task
+	var task model.Task
 	err := json.NewDecoder(r.Body).Decode(&task)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
