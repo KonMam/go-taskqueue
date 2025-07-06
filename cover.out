@@ -1,0 +1,18 @@
+mode: set
+go-taskqueue/main.go:10.13,19.16 7 0
+go-taskqueue/main.go:19.16,21.3 1 0
+go-taskqueue/api/server.go:18.54,21.16 3 1
+go-taskqueue/api/server.go:21.16,24.3 2 1
+go-taskqueue/api/server.go:26.2,30.9 4 1
+go-taskqueue/api/server.go:30.9,33.3 2 1
+go-taskqueue/api/server.go:35.2,36.33 2 1
+go-taskqueue/api/server.go:39.55,42.16 3 1
+go-taskqueue/api/server.go:42.16,45.3 2 1
+go-taskqueue/api/server.go:47.2,57.33 9 1
+go-taskqueue/api/server.go:60.42,70.2 4 1
+go-taskqueue/worker/worker.go:16.56,19.2 2 1
+go-taskqueue/worker/worker.go:21.14,22.12 1 1
+go-taskqueue/worker/worker.go:22.12,23.33 1 1
+go-taskqueue/worker/worker.go:23.33,28.44 4 1
+go-taskqueue/worker/worker.go:28.44,31.5 2 1
+go-taskqueue/worker/worker.go:32.4,34.73 2 1

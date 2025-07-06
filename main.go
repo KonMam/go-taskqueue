@@ -1,14 +1,16 @@
 package main
 
 import (
-	"fmt"
 	"log"
 
 	"go-taskqueue/api"
+	"go-taskqueue/worker"
 )
 
 func main() {
-	fmt.Println("Hello world!")
+	worker.Init(api.TaskStore, &api.TaskStoreMu)
+	worker.Start()
+
 	addr := ":8080"
 	server := api.NewServer(addr)
 

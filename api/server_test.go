@@ -13,7 +13,7 @@ import (
 
 func resetState() {
 	taskIDCounter = 0
-	taskStore = make(map[int]*model.Task)
+	TaskStore = make(map[int]*model.Task)
 	queue.Tasks = make(chan model.Task, 10)
 }
 
@@ -22,10 +22,10 @@ func TestGetTask(t *testing.T) {
 		resetState()
 
 		task := &model.Task{ID: 1, Status: "queued", Result: 42}
-		taskStoreMu.Lock()
-		taskStore[1] = task
+		TaskStoreMu.Lock()
+		TaskStore[1] = task
 		taskIDCounter = 1
-		taskStoreMu.Unlock()
+		TaskStoreMu.Unlock()
 
 		req := httptest.NewRequest("GET", "/tasks/1", nil)
 		req.SetPathValue("id", "1")
@@ -110,4 +110,45 @@ func TestPostTask(t *testing.T) {
 			t.Errorf("expected 400, got %d", w.Result().StatusCode)
 		}
 	})
+}
+
+
+
+func TestNewServer_Integration(t *testing.T) {
+	resetState()
+
+	server := NewServer(":0")
+	ts := httptest.NewServer(server.Handler)
+	defer ts.Close()
+
+	// POST /tasks
+	payload := []byte(`{"status":"test","result":21}`)
+	resp, err := http.Post(ts.URL+"/tasks", "application/json", bytes.NewReader(payload))
+	if err != nil {
+		t.Fatalf("failed to post: %v", err)
+	}
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", resp.StatusCode)
+	}
+
+	var posted model.Task
+	json.NewDecoder(resp.Body).Decode(&posted)
+	if posted.ID != 1 {
+		t.Errorf("expected ID 1, got %d", posted.ID)
+	}
+
+	// GET /tasks/1
+	getResp, err := http.Get(ts.URL + "/tasks/1")
+	if err != nil {
+		t.Fatalf("failed to get task: %v", err)
+	}
+	if getResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", getResp.StatusCode)
+	}
+
+	var fetched model.Task
+	json.NewDecoder(getResp.Body).Decode(&fetched)
+	if fetched.ID != 1 {
+		t.Errorf("expected ID 1, got %d", fetched.ID)
+	}
 }

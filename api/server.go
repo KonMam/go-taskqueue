@@ -10,9 +10,9 @@ import (
 )
 
 
-var taskStore = make(map[int]*model.Task)
+var TaskStore = make(map[int]*model.Task)
 var taskIDCounter int
-var taskStoreMu sync.RWMutex
+var TaskStoreMu sync.RWMutex
 
 
 func getTask(w http.ResponseWriter, r *http.Request) {
@@ -23,9 +23,9 @@ func getTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	taskStoreMu.RLock()
-	task, ok := taskStore[id]
-	taskStoreMu.RUnlock()
+	TaskStoreMu.RLock()
+	task, ok := TaskStore[id]
+	TaskStoreMu.RUnlock()
 
 	if !ok {
 		http.Error(w, "task not found", http.StatusNotFound)
@@ -44,12 +44,12 @@ func postTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	taskStoreMu.Lock()
+	TaskStoreMu.Lock()
 	taskIDCounter++
 	task.ID = taskIDCounter
 	task.Status = "queued"
-	taskStore[task.ID] = &task
-	taskStoreMu.Unlock()
+	TaskStore[task.ID] = &task
+	TaskStoreMu.Unlock()
 	
 	queue.Tasks <- task
 
