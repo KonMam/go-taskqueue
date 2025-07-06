@@ -1,8 +1,7 @@
-package main
+package api
 
 import (
 	"encoding/json"
-	"log"
 	"net/http"
 	"strconv"
 )
@@ -58,15 +57,14 @@ func postTask(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(task)
 }
 
-func main() {
+func NewServer(addr string) *http.Server {
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("GET /tasks/{id}/", getTask)
-	mux.HandleFunc("POST /tasks/", postTask)
+	mux.HandleFunc("GET /tasks/{id}", getTask)
+	mux.HandleFunc("POST /tasks", postTask)
 
-	log.Println("Server started at :8080")
-	err := http.ListenAndServe(":8080", mux)
-	if err != nil {
-		log.Fatalf("Server failed to start: %v", err)
+	return &http.Server{
+		Addr:    addr,
+		Handler: mux,
 	}
 }
