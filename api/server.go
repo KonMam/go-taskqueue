@@ -2,18 +2,19 @@ package api
 
 import (
 	"encoding/json"
-	"go-taskqueue/model"
-	"go-taskqueue/queue"
 	"net/http"
 	"strconv"
 	"sync"
+
+	"go-taskqueue/model"
+	"go-taskqueue/queue"
 )
 
-
-var TaskStore = make(map[int]*model.Task)
-var taskIDCounter int
-var TaskStoreMu sync.RWMutex
-
+var (
+	TaskStore     = make(map[int]*model.Task)
+	taskIDCounter int
+	TaskStoreMu   sync.RWMutex
+)
 
 func getTask(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
@@ -50,8 +51,12 @@ func postTask(w http.ResponseWriter, r *http.Request) {
 	task.Status = "queued"
 	TaskStore[task.ID] = &task
 	TaskStoreMu.Unlock()
-	
-	queue.Tasks <- task
+
+	err = queue.Enqueue(task)
+	if err != nil {
+		http.Error(w, "failed to enqueue task", http.StatusInternalServerError)
+		return
+	}
 
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(task)

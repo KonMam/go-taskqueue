@@ -4,10 +4,12 @@ import (
 	"log"
 
 	"go-taskqueue/api"
+	"go-taskqueue/queue"
 	"go-taskqueue/worker"
 )
 
 func main() {
+	queue.InitRedis()
 	worker.Init(api.TaskStore, &api.TaskStoreMu)
 	worker.Start()
 

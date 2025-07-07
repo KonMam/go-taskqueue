@@ -3,13 +3,13 @@ package api
 import (
 	"bytes"
 	"encoding/json"
-	"go-taskqueue/model"
-	"go-taskqueue/queue"
 	"net/http"
 	"net/http/httptest"
 	"testing"
-)
 
+	"go-taskqueue/model"
+	"go-taskqueue/queue"
+)
 
 func resetState() {
 	taskIDCounter = 0
@@ -111,8 +111,6 @@ func TestPostTask(t *testing.T) {
 		}
 	})
 }
-
-
 
 func TestNewServer_Integration(t *testing.T) {
 	resetState()
