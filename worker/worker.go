@@ -1,7 +1,7 @@
 package worker
 
 import (
-	"fmt"
+	"context"
 	"log"
 	"sync"
 	"time"
@@ -20,29 +20,44 @@ func Init(store map[int]*model.Task, mu *sync.RWMutex) {
 	TaskStoreMu = mu
 }
 
-func Start() {
-	go func() {
-		for {
-			task, err := queue.Dequeue(5 * time.Second)
-			if err != nil {
-				log.Printf("worker dequeue error: %v", err)
-				continue
-			}
-			if task == nil {
-				continue
-			}
+func Start(ctx context.Context, workerCount int, wg *sync.WaitGroup) {
+	for i := 0; i < workerCount; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for {
+				select {
+				case <-ctx.Done():
+					log.Printf("[worker %d] shutting down", id)
+					return
+				default:
+					task, err := queue.Dequeue(2 * time.Second)
+					if err != nil {
+						log.Printf("[worker %d] dequeue error: %v", id, err)
+						continue
+					}
+					if task == nil {
+						continue
+					}
 
-			task.Result = task.Result * 2
-			task.Status = "completed"
+					processTask(task)
 
-			TaskStoreMu.Lock()
-			if stored, ok := TaskStore[task.ID]; ok {
-				stored.Status = task.Status
-				stored.Result = task.Result
+					TaskStoreMu.Lock()
+					if stored, ok := TaskStore[task.ID]; ok {
+						stored.Status = task.Status
+						stored.Result = task.Result
+					}
+					TaskStoreMu.Unlock()
+
+					log.Printf("[worker %d] processed task ID %d", id, task.ID)
+				}
 			}
-			TaskStoreMu.Unlock()
+		}(i + 1)
+	}
+}
 
-			fmt.Printf("Processed task ID %d: result=%d\n", task.ID, task.Result)
-		}
-	}()
+func processTask(task *model.Task) {
+	time.Sleep(100 * time.Millisecond) // Work simulation
+	task.Result *= 2
+	task.Status = "completed"
 }

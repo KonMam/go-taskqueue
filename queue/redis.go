@@ -18,7 +18,7 @@ var redisClient *redis.Client
 
 const queueKey = "taskqueue:tasks"
 
-func InitRedis() {
+func InitRedis() error {
 	addr := os.Getenv("REDIS_ADDR")
 	if addr == "" {
 		addr = "localhost:6379"
@@ -30,8 +30,9 @@ func InitRedis() {
 
 	err := redisClient.Ping(ctx).Err()
 	if err != nil {
-		panic(fmt.Sprintf("failed to connect to Redis: %v", err))
+		return err
 	}
+	return nil
 }
 
 func Enqueue(task model.Task) error {
