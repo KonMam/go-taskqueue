@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log"
 	"math/rand"
@@ -10,25 +11,24 @@ import (
 
 	"go-taskqueue/model"
 	"go-taskqueue/queue"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-var (
-	TaskStore   map[int]*model.Task
-	TaskStoreMu *sync.RWMutex
-)
+var dbPool *pgxpool.Pool
 
-func Init(store map[int]*model.Task, mu *sync.RWMutex) {
-	TaskStore = store
-	TaskStoreMu = mu
+func Init(pool *pgxpool.Pool) {
+	dbPool = pool
 }
 
-func updateTaskStore(task *model.Task) {
-	TaskStoreMu.Lock()
-	if stored, ok := TaskStore[task.ID]; ok {
-		stored.Status = task.Status
-		stored.Result = task.Result
-	}
-	TaskStoreMu.Unlock()
+func updateTaskStore(ctx context.Context, task *model.Task) error {
+	_, err := dbPool.Exec(ctx, `
+		UPDATE tasks
+		SET status = $1, result = $2, retries = $3, updated_at = CURRENT_TIMESTAMP
+		WHERE id = $4`,
+		task.Status, task.Result, task.Retries, task.ID,
+	)
+	return err
 }
 
 func Start(ctx context.Context, workerCount int, wg *sync.WaitGroup) {
@@ -65,13 +65,18 @@ func Start(ctx context.Context, workerCount int, wg *sync.WaitGroup) {
 							})
 						} else {
 							task.Status = "failed"
-							updateTaskStore(task)
+							if err := updateTaskStore(ctx, task); err != nil {
+								log.Printf("[worker %d] Failed to update task %d: %v", id, task.ID, err)
+							}
 							log.Printf("[worker %d] Task %d failed after %d retries", id, task.ID, task.Retries)
 						}
 						continue
 					}
 
-					updateTaskStore(task)
+					if err := updateTaskStore(ctx, task); err != nil {
+						log.Printf("[worker %d] Failed to update task %d: %v", id, task.ID, err)
+						continue
+					}
 					log.Printf("[worker %d] processed task ID %d", id, task.ID)
 				}
 			}
@@ -83,7 +88,19 @@ func processTask(task *model.Task) error {
 	if rand.Intn(4) == 0 {
 			return errors.New("simulated failure")
 	}
-	task.Result *= 2
+	var n int
+	if err := json.Unmarshal(task.Payload, &n); err != nil {
+		return err
+	}
+
+	n *= 2
+
+	b, err := json.Marshal(n)
+	if err != nil {
+		return err
+	}
+
+	task.Result = json.RawMessage(b)
 	task.Status = "completed"
 	return nil
 }

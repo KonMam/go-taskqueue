@@ -15,6 +15,7 @@ import (
 	"go-taskqueue/queue"
 	"go-taskqueue/worker"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 )
 
@@ -23,28 +24,41 @@ func main() {
         log.Printf("Warning: Failed to load .env file: %v", err)
     }
 
-	addr := os.Getenv("SERVER_ADDR")
-	if addr == "" {
-		addr = ":8080"
+	// Initialize Postgres
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		dbURL = "postgres://taskqueue:password@localhost:5432/taskqueue?sslmode=disable"
 	}
-	workerCount, err := strconv.Atoi(os.Getenv("WORKER_COUNT"))
-	if err != nil || workerCount <= 0 {
-		workerCount = 5
+	dbPool, err := pgxpool.New(context.Background(), dbURL)
+	if err != nil {
+		log.Fatalf("Failed to connect to PostgreSQL: %v", err)
 	}
+	defer dbPool.Close()
 
+	// Initialize Redis
 	if err := queue.InitRedis(); err != nil {
 		log.Fatalf("Failed to initialize Redis: %v", err)
 	}
 
-	worker.Init(api.TaskStore, &api.TaskStoreMu)
+	// Initialize Workers
+	worker.Init(dbPool)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
 	var wg sync.WaitGroup
 
+	workerCount, err := strconv.Atoi(os.Getenv("WORKER_COUNT"))
+	if err != nil || workerCount <= 0 {
+		workerCount = 5
+		log.Printf("Using default WORKER_COUNT=%d", workerCount)
+	}
 	worker.Start(ctx, workerCount, &wg)
 
-	server := api.NewServer(addr)
+	addr := os.Getenv("SERVER_ADDR")
+	if addr == "" {
+		addr = ":8080"
+	}
+	server := api.NewServer(addr, dbPool)
 
 	go func() {
 		log.Printf("Starting server on %s", addr)
