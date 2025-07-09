@@ -65,3 +65,23 @@ func Dequeue(blockFor time.Duration) (*model.Task, error) {
 
 	return &task, nil
 }
+
+func Remove(taskID int) error {
+	entries, err := redisClient.LRange(ctx, queueKey, 0, -1).Result()
+	if err != nil {
+		return fmt.Errorf("failed to fetch queue entries: %w", err)
+	}
+
+	for _, entry := range entries {
+		var t model.Task
+		if err := json.Unmarshal([]byte(entry), &t); err != nil {
+			continue
+		}
+
+		if t.ID == taskID {
+			return redisClient.LRem(ctx, queueKey, 1, entry).Err()
+		}
+	}
+
+	return nil
+}
