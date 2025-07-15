@@ -29,13 +29,17 @@ jobs:
 
       - name: Download Go Modules
         run: go mod download
+        env:
+          GO111MODULE: on
 
       - name: Run GolangCI-Lint
         uses: golangci/golangci-lint-action@v6
         with:
-          version: v1.59
+          version: v1.61.0
           working-directory: ./
-          args: --timeout=5m ./...
+          args: --timeout=5m --verbose ./...
+        env:
+          GO111MODULE: on
 
       - name: Build
         run: go build -v ./...
