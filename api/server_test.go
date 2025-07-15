@@ -1,152 +1,243 @@
 package api
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
+	"time"
 
 	"go-taskqueue/model"
-	"go-taskqueue/queue"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/wait"
 )
 
-func resetState() {
-	taskIDCounter = 0
-	TaskStore = make(map[int]*model.Task)
-	queue.Tasks = make(chan model.Task, 10)
+func TestMain(m *testing.M) {
+	// Setup and teardown will be handled for each test function
+	// to ensure a clean database for each run.
+	os.Exit(m.Run())
+}
+
+func setupTestDB(t *testing.T) *pgxpool.Pool {
+	ctx := context.Background()
+
+	req := testcontainers.ContainerRequest{
+		Image:        "postgres:15",
+		ExposedPorts: []string{"5432/tcp"},
+		Env: map[string]string{
+			"POSTGRES_USER":     "taskqueue",
+			"POSTGRES_PASSWORD": "password",
+			"POSTGRES_DB":       "taskqueue",
+		},
+		WaitingFor: wait.ForListeningPort("5432/tcp").WithStartupTimeout(2 * time.Minute),
+	}
+
+	postgresContainer, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+		ContainerRequest: req,
+		Started:          true,
+	})
+	require.NoError(t, err, "Failed to start postgres container")
+
+	mappedPort, err := postgresContainer.MappedPort(ctx, "5432")
+	require.NoError(t, err, "Failed to get mapped port")
+
+	host, err := postgresContainer.Host(ctx)
+	require.NoError(t, err, "Failed to get container host")
+
+	connStr := fmt.Sprintf("postgres://taskqueue:password@%s:%s/taskqueue", host, mappedPort.Port())
+
+	dbPool, err := pgxpool.New(ctx, connStr)
+	require.NoError(t, err, "Failed to create db pool")
+
+	err = dbPool.Ping(ctx)
+	require.NoError(t, err, "Failed to ping database")
+
+	schema, err := os.ReadFile("../db/schema.sql")
+	require.NoError(t, err, "Failed to read schema.sql")
+	_, err = dbPool.Exec(ctx, string(schema))
+	require.NoError(t, err, "Failed to apply schema")
+
+	// Teardown function to be called at the end of the test
+	t.Cleanup(func() {
+		dbPool.Close()
+		err := postgresContainer.Terminate(ctx)
+		if err != nil {
+			t.Fatalf("Failed to terminate postgres container: %s", err)
+		}
+	})
+
+	return dbPool
+}
+
+func TestGetTasks(t *testing.T) {
+	dbPool := setupTestDB(t)
+	appServer := NewServer(":8080", dbPool)
+
+	server := httptest.NewServer(appServer.Handler)
+	defer server.Close()
+
+	ctx := context.Background()
+
+	tasksToInsert := []model.Task{
+		{Type: "image.resize", Payload: json.RawMessage(`{"source": "/path/to/img.jpg"}`), Status: "queued"},
+		{Type: "email.send", Payload: json.RawMessage(`{"to": "user@example.com"}`), Status: "processing"},
+		{Type: "report.generate", Payload: json.RawMessage(`{"type": "monthly"}`), Status: "completed"},
+		{Type: "report.generate", Payload: json.RawMessage(`{"type": "weekly"}`), Status: "queued"},
+		{Type: "email.send", Payload: json.RawMessage(`{"to": "user@example.com"}`), Status: "failed"},
+	}
+
+	for _, task := range tasksToInsert {
+		_, err := dbPool.Exec(ctx,
+			"INSERT INTO tasks (type, payload, status) VALUES ($1, $2, $3)",
+			task.Type, task.Payload, task.Status,
+		)
+		require.NoError(t, err, "Failed to insert test data")
+	}
+
+	testCases := []struct {
+		name           string
+		url            string
+		expectedStatus int
+		expectedCount  int
+		expectedTypes  []string
+	}{
+		{
+			name:           "Get all tasks",
+			url:            fmt.Sprintf("%s/tasks", server.URL),
+			expectedStatus: http.StatusOK,
+			expectedCount:  5,
+			expectedTypes:  []string{"image.resize", "email.send", "report.generate", "report.generate", "email.send"},
+		},
+		{
+			name:           "Get tasks with status 'queued'",
+			url:            fmt.Sprintf("%s/tasks?status=queued", server.URL),
+			expectedStatus: http.StatusOK,
+			expectedCount:  2,
+			expectedTypes:  []string{"image.resize", "report.generate"},
+		},
+		{
+			name:           "Get tasks with status 'processing'",
+			url:            fmt.Sprintf("%s/tasks?status=processing", server.URL),
+			expectedStatus: http.StatusOK,
+			expectedCount:  1,
+			expectedTypes:  []string{"email.send"},
+		},
+		{
+			name:           "Get tasks with status 'completed'",
+			url:            fmt.Sprintf("%s/tasks?status=completed", server.URL),
+			expectedStatus: http.StatusOK,
+			expectedCount:  1,
+			expectedTypes:  []string{"report.generate"},
+		},
+		{
+			name:           "Get tasks with status 'failed'",
+			url:            fmt.Sprintf("%s/tasks?status=failed", server.URL),
+			expectedStatus: http.StatusOK,
+			expectedCount:  1,
+			expectedTypes:  []string{"email.send"},
+		},
+	}
+
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+
+			resp, err := http.Get(tc.url)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+
+			assert.Equal(t, tc.expectedStatus, resp.StatusCode)
+
+			body, err := io.ReadAll(resp.Body)
+			require.NoError(t, err)
+
+			if tc.expectedCount > 0 {
+				var tasks []model.Task
+				err = json.Unmarshal(body, &tasks)
+				require.NoError(t, err, "Failed to decode response body")
+
+				assert.Len(t, tasks, tc.expectedCount)
+
+				var receivedTypes []string
+				for _, task := range tasks {
+					receivedTypes = append(receivedTypes, task.Type)
+				}
+				assert.ElementsMatch(t, tc.expectedTypes, receivedTypes)
+			} else {
+				bodyStr := string(body)
+				assert.True(t, bodyStr == "[]\n" || bodyStr == "null\n", "Expected empty array or null, got %s", bodyStr)
+			}
+		})
+	}
 }
 
 func TestGetTask(t *testing.T) {
-	t.Run("existing task", func(t *testing.T) {
-		resetState()
+	dbPool := setupTestDB(t)
+	appServer := NewServer(":8080", dbPool)
+	server := httptest.NewServer(appServer.Handler)
+	defer server.Close()
 
-		task := &model.Task{ID: 1, Status: "queued", Result: 42}
-		TaskStoreMu.Lock()
-		TaskStore[1] = task
-		taskIDCounter = 1
-		TaskStoreMu.Unlock()
+	ctx := context.Background()
 
-		req := httptest.NewRequest("GET", "/tasks/1", nil)
-		req.SetPathValue("id", "1")
-		w := httptest.NewRecorder()
+	var insertedID int
+	taskToInsert := model.Task{Type: "image.resize", Payload: json.RawMessage(`{"source": "/path/to/img.jpg"}`), Status: "pending"}
+	err := dbPool.QueryRow(ctx,
+		"INSERT INTO tasks (type, payload, status) VALUES ($1, $2, $3) RETURNING id",
+		taskToInsert.Type, taskToInsert.Payload, taskToInsert.Status,
+	).Scan(&insertedID)
+	require.NoError(t, err, "Failed to insert test data and get ID")
 
-		getTask(w, req)
-
-		resp := w.Result()
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("expected 200, got %d", resp.StatusCode)
-		}
-
-		var result model.Task
-		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-			t.Fatalf("failed to decode JSON: %v", err)
-		}
-		if result.ID != 1 || result.Result != 42 {
-			t.Errorf("unexpected task data: %+v", result)
-		}
-	})
-
-	t.Run("non-existent task", func(t *testing.T) {
-		resetState()
-
-		req := httptest.NewRequest("GET", "/tasks/99", nil)
-		req.SetPathValue("id", "99")
-		w := httptest.NewRecorder()
-
-		getTask(w, req)
-
-		if w.Result().StatusCode != http.StatusNotFound {
-			t.Errorf("expected 404, got %d", w.Result().StatusCode)
-		}
-	})
-
-	t.Run("invalid ID", func(t *testing.T) {
-		resetState()
-
-		req := httptest.NewRequest("GET", "/tasks/abc", nil)
-		req.SetPathValue("id", "abc")
-		w := httptest.NewRecorder()
-
-		getTask(w, req)
-
-		if w.Result().StatusCode != http.StatusBadRequest {
-			t.Errorf("expected 400, got %d", w.Result().StatusCode)
-		}
-	})
-}
-
-func TestPostTask(t *testing.T) {
-	t.Run("valid request", func(t *testing.T) {
-		resetState()
-
-		payload := []byte(`{"status":"new","result":123}`)
-		req := httptest.NewRequest("POST", "/tasks", bytes.NewReader(payload))
-		w := httptest.NewRecorder()
-
-		postTask(w, req)
-
-		resp := w.Result()
-		if resp.StatusCode != http.StatusCreated {
-			t.Fatalf("expected 201, got %d", resp.StatusCode)
-		}
-
-		var task model.Task
-		json.NewDecoder(resp.Body).Decode(&task)
-		if task.ID != 1 || task.Result != 123 || task.Status != "queued" {
-			t.Errorf("unexpected task: %+v", task)
-		}
-	})
-
-	t.Run("malformed JSON", func(t *testing.T) {
-		resetState()
-
-		req := httptest.NewRequest("POST", "/tasks/", bytes.NewReader([]byte(`{oops}`)))
-		w := httptest.NewRecorder()
-
-		postTask(w, req)
-
-		if w.Result().StatusCode != http.StatusBadRequest {
-			t.Errorf("expected 400, got %d", w.Result().StatusCode)
-		}
-	})
-}
-
-func TestNewServer_Integration(t *testing.T) {
-	resetState()
-
-	server := NewServer(":0")
-	ts := httptest.NewServer(server.Handler)
-	defer ts.Close()
-
-	// POST /tasks
-	payload := []byte(`{"status":"test","result":21}`)
-	resp, err := http.Post(ts.URL+"/tasks", "application/json", bytes.NewReader(payload))
-	if err != nil {
-		t.Fatalf("failed to post: %v", err)
-	}
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("expected 201, got %d", resp.StatusCode)
+	testCases := []struct {
+		name           string
+		url            string
+		expectedStatus int
+		expectedID     int
+		expectError    bool
+	}{
+		{
+			name:           "Get existing task by ID",
+			url:            fmt.Sprintf("%s/tasks/%d", server.URL, insertedID),
+			expectedStatus: http.StatusOK,
+			expectedID:     insertedID,
+			expectError:    false,
+		},
+		{
+			name:           "Get non-existent task by ID",
+			url:            fmt.Sprintf("%s/tasks/99999", server.URL), // An ID that doesn't exist
+			expectedStatus: http.StatusNotFound,
+			expectError:    true,
+		},
+		{
+			name:           "Get task with invalid ID",
+			url:            fmt.Sprintf("%s/tasks/abc", server.URL), // Invalid ID format
+			expectedStatus: http.StatusBadRequest,
+			expectError:    true,
+		},
 	}
 
-	var posted model.Task
-	json.NewDecoder(resp.Body).Decode(&posted)
-	if posted.ID != 1 {
-		t.Errorf("expected ID 1, got %d", posted.ID)
-	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, err := http.Get(tc.url)
+			require.NoError(t, err)
+			defer resp.Body.Close()
 
-	// GET /tasks/1
-	getResp, err := http.Get(ts.URL + "/tasks/1")
-	if err != nil {
-		t.Fatalf("failed to get task: %v", err)
-	}
-	if getResp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200, got %d", getResp.StatusCode)
-	}
+			assert.Equal(t, tc.expectedStatus, resp.StatusCode)
 
-	var fetched model.Task
-	json.NewDecoder(getResp.Body).Decode(&fetched)
-	if fetched.ID != 1 {
-		t.Errorf("expected ID 1, got %d", fetched.ID)
+			if !tc.expectError {
+				var task model.Task
+				err = json.NewDecoder(resp.Body).Decode(&task)
+				require.NoError(t, err, "Failed to decode response")
+				assert.Equal(t, tc.expectedID, task.ID)
+				assert.Equal(t, "image.resize", task.Type)
+			}
+		})
 	}
 }

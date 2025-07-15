@@ -99,6 +99,7 @@ func (s *Server) getTasks(w http.ResponseWriter, r *http.Request) {
 
 	validValues := map[string]bool{
 		"completed": true,
+		"processing": true,
 		"queued":    true,
 		"failed":    true,
 		"":          true,

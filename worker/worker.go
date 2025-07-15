@@ -51,13 +51,13 @@ func Start(ctx context.Context, workerCount int, wg *sync.WaitGroup) {
 						continue
 					}
 
-					err = processTask(task)
+					err = processTask(ctx, task, id)
 					if err != nil {
 						if task.Retries < 3 {
 							task.Retries++
 							delay := time.Second * time.Duration(1<<task.Retries)
 							log.Printf("[worker %d] Retrying task %d in %v (attempt %d)", id, task.ID, delay, task.Retries)
-							
+
 							time.AfterFunc(delay, func() {
 								if err := queue.Enqueue(*task); err != nil {
 									log.Printf("[worker %d] Failed to re-enqueue task %d: %v", id, task.ID, err)
@@ -84,9 +84,16 @@ func Start(ctx context.Context, workerCount int, wg *sync.WaitGroup) {
 	}
 }
 
-func processTask(task *model.Task) error {
+func processTask(ctx context.Context, task *model.Task, id int) error {
+	// this block might be shady
+	task.Status = "processing"
+	if err := updateTaskStore(ctx, task); err != nil {
+		log.Printf("[worker %d] Failed to update task status %d: %v", id, task.ID, err)
+	}
+	// ABOVE
+
 	if rand.Intn(4) == 0 {
-			return errors.New("simulated failure")
+		return errors.New("simulated failure")
 	}
 	var n int
 	if err := json.Unmarshal(task.Payload, &n); err != nil {
