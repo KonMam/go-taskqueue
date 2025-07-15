@@ -154,7 +154,6 @@ func TestGetTasks(t *testing.T) {
 				if err := resp.Body.Close(); err != nil {
 					t.Errorf("failed to close response body: %v", err)
 				}
-				defer resp.Body.Close()
 			}()
 
 			assert.Equal(t, tc.expectedStatus, resp.StatusCode)
