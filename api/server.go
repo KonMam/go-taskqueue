@@ -16,7 +16,6 @@ import (
 
 type Server struct {
 	dbPool *pgxpool.Pool
-	server *http.Server
 }
 
 func NewServer(addr string, dbPool *pgxpool.Pool) *http.Server {
@@ -58,7 +57,10 @@ func (s *Server) getTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(task)
+	if err := json.NewEncoder(w).Encode(task); err != nil {
+		http.Error(w, "[API] Encoding error", http.StatusInternalServerError)
+		return
+	}
 }
 
 func (s Server) postTask(w http.ResponseWriter, r *http.Request) {
@@ -88,7 +90,10 @@ func (s Server) postTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(task)
+	if err := json.NewEncoder(w).Encode(task); err != nil {
+		http.Error(w, "[API] Encoding error", http.StatusInternalServerError)
+		return
+	}
 }
 
 func (s *Server) getTasks(w http.ResponseWriter, r *http.Request) {
@@ -98,11 +103,11 @@ func (s *Server) getTasks(w http.ResponseWriter, r *http.Request) {
 	// ADD OFFSET
 
 	validValues := map[string]bool{
-		"completed": true,
+		"completed":  true,
 		"processing": true,
-		"queued":    true,
-		"failed":    true,
-		"":          true,
+		"queued":     true,
+		"failed":     true,
+		"":           true,
 	}
 
 	if !validValues[statusFilter] {
@@ -143,15 +148,18 @@ func (s *Server) getTasks(w http.ResponseWriter, r *http.Request) {
 		tasks = append(tasks, task)
 	}
 
+	w.Header().Set("Content-Type", "application/json")
 	if len(tasks) == 0 {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode([]model.Task{})
+		if err := json.NewEncoder(w).Encode([]model.Task{}); err != nil {
+			http.Error(w, "[API] Encoding error", http.StatusInternalServerError)
+			return
+		}
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(tasks); err != nil {
 		http.Error(w, "[API] Encoding error", http.StatusInternalServerError)
+		return
 	}
 }
 

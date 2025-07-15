@@ -146,13 +146,16 @@ func TestGetTasks(t *testing.T) {
 		},
 	}
 
-
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-
 			resp, err := http.Get(tc.url)
 			require.NoError(t, err)
-			defer resp.Body.Close()
+			defer func() {
+				if err := resp.Body.Close(); err != nil {
+					t.Errorf("failed to close response body: %v", err)
+				}
+				defer resp.Body.Close()
+			}()
 
 			assert.Equal(t, tc.expectedStatus, resp.StatusCode)
 
@@ -227,7 +230,11 @@ func TestGetTask(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			resp, err := http.Get(tc.url)
 			require.NoError(t, err)
-			defer resp.Body.Close()
+			defer func() {
+				if err := resp.Body.Close(); err != nil {
+					t.Errorf("failed to close response body: %v", err)
+				}
+			}()
 
 			assert.Equal(t, tc.expectedStatus, resp.StatusCode)
 
