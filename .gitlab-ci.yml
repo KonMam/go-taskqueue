@@ -1,0 +1,33 @@
+stages:
+  - build
+  - test
+  - lint
+
+image: golang:1.22
+
+build_job:
+  stage: build
+  script:
+    - echo "Building Go application..."
+    - go build -v ./...
+
+test_job:
+  stage: test
+  services:
+    - docker:dind 
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+    DOCKER_DRIVER: overlay2 
+  script:
+    - echo "Running Go tests with Testcontainers..."
+    - docker info
+    - go test -v ./... 
+
+lint_job:
+  stage: lint
+  script:
+    - echo "Running GolangCI-Lint..."
+    - go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.59.1
+    - golangci-lint run ./...
+  allow_failure: true
