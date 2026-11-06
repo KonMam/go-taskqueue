@@ -6,9 +6,11 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"go-taskqueue/model"
 	"go-taskqueue/queue"
+	"go-taskqueue/worker"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -26,6 +28,7 @@ func NewServer(addr string, dbPool *pgxpool.Pool) *http.Server {
 	mux.HandleFunc("DELETE /tasks/{id}", srv.cancelTaskByID)
 	mux.HandleFunc("GET /tasks", srv.getTasks)
 	mux.HandleFunc("POST /tasks", srv.postTask)
+	mux.HandleFunc("GET /workers/inflight", srv.getInFlight)
 
 	return &http.Server{
 		Addr:    addr,
@@ -215,4 +218,18 @@ func (s *Server) cancelTaskByID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) getInFlight(w http.ResponseWriter, r *http.Request) {
+	running := worker.InFlight()
+	out := make(map[string]string, len(running))
+	for id, d := range running {
+		out[strconv.Itoa(id)] = d.Round(time.Millisecond).String()
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(out); err != nil {
+		http.Error(w, "[API] Encoding error", http.StatusInternalServerError)
+		return
+	}
 }

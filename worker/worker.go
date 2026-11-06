@@ -17,6 +17,33 @@ import (
 
 var dbPool *pgxpool.Pool
 
+var (
+	inflightMu sync.Mutex
+	inflight   = make(map[int]time.Time)
+)
+
+func markInFlight(taskID int) {
+	inflightMu.Lock()
+	inflight[taskID] = time.Now()
+	inflightMu.Unlock()
+}
+
+func clearInFlight(taskID int) {
+	inflightMu.Lock()
+	delete(inflight, taskID)
+	inflightMu.Unlock()
+}
+
+// InFlight returns the tasks currently being processed and how long each
+// has been running.
+func InFlight() map[int]time.Duration {
+	out := make(map[int]time.Duration, len(inflight))
+	for id, started := range inflight {
+		out[id] = time.Since(started)
+	}
+	return out
+}
+
 func Init(pool *pgxpool.Pool) {
 	dbPool = pool
 }
@@ -51,7 +78,9 @@ func Start(ctx context.Context, workerCount int, wg *sync.WaitGroup) {
 						continue
 					}
 
+					markInFlight(task.ID)
 					err = processTask(ctx, task, id)
+					clearInFlight(task.ID)
 					if err != nil {
 						if task.Retries < 3 {
 							task.Retries++
