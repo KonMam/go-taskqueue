@@ -1,0 +1,27 @@
+name: pr-review
+
+# Precision-first Go reviewer from KonMam/pr-review-agent: inline comments on
+# likely bugs (never style), plus a JSONL findings log as a workflow artifact.
+# Needs the OPENROUTER_API_KEY repo secret; skipped without it.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: pr-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: KonMam/pr-review-agent@main
+        with:
+          openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
